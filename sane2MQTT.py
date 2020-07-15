@@ -6,6 +6,7 @@
 
 import optparse, logging, signal, time, re, argparse
 import paho.mqtt.client as mqtt
+import sane
 
 
 DEFAULT_MQTT_SERVER = "127.0.0.1"
@@ -31,6 +32,8 @@ class GracefulKiller:
 
 def on_connect(client, userdata, flags, rc):
 	userdata['logger'].info("Connected with result code: %i", rc)
+
+	client.subscribe(userdata["in-topic"], qos=1)
 # end on_connect
 
 
@@ -42,6 +45,11 @@ def on_disconnect(client, userdata, rc):
 		userdata['logger'].info(msg, rc)
 	# end if
 # end on_disconnect
+
+
+def on_message(client, userdata, msg):
+	userdata['logger'].info("Topic: %s - Message: %s", msg.topic, msg.payload.decode())
+# end on_message
 
 
 def main():
@@ -108,9 +116,14 @@ def main():
 	# parse options
 	(options, _) = parser.parse_args()
 
+	# mqtt topics
+	mqttTopic = str(options.topic)
+	while (mqttTopic.endswith("/")):
+		mqttTopic = mqttTopic[:-1]
+
 	# add infos to userdata
 	userdata = dict()
-	userdata["topic"] = options.topic
+	userdata["in-topic"] = mqttTopic + "/in"
 	
 	# init logging
 	loglevel = int(options.loglevel)
@@ -118,6 +131,7 @@ def main():
 		loglevel = logging.DEBUG
 	# end if
 	logger = logging.getLogger("miflora2mqtt")
+	userdata["logger"] = logger
 	logger.setLevel(loglevel)
 	ch = logging.StreamHandler()
 	ch.setLevel(loglevel)
@@ -152,7 +166,7 @@ def main():
 	# debug output
 	logger.debug("server: %s" ,options.server)
 	logger.debug("port: %i", options.port)
-	logger.debug("topic: %s", options.topic)
+	logger.debug("topic: %s", mqttTopic)
 
 	# connect to mqttclient
 	logger.debug("connect to mqtt client")
