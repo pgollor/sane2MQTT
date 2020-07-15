@@ -4,7 +4,7 @@
 # \author Pascal Gollor
 # \copyright cc 2020 by-sa
 
-import optparse, logging, signal, time, re, argparse
+import optparse, logging, signal, time, re, argparse, json
 import paho.mqtt.client as mqtt
 import sane
 
@@ -30,31 +30,39 @@ class GracefulKiller:
 # end class GracefulKiller
 
 
-def on_connect(client, userdata, flags, rc):
-	userdata['logger'].info("Connected with result code: %i", rc)
+class saneMQTT(mqtt.Client):
 
-	client.subscribe(userdata["in-topic"], qos=1)
+	def on_connect(self, client, userdata, flags, rc):
+		userdata['logger'].info("Connected with result code: %i", rc)
 
-	stateTopic = userdata["out-topic"] + "/state"
-	client.publish(stateTopic, payload="online", qos=1, retain=True)
-	# last will message
-	client.will_set(stateTopic, payload="offline", qos=1, retain=True)
-# end on_connect
+		client.subscribe(userdata["in-topic"], qos=1)
 
-
-def on_disconnect(client, userdata, rc):
-	msg = "Disconnected with result code: %i"
-	if (rc):
-		userdata['logger'].error(msg, rc)
-	else:
-		userdata['logger'].info(msg, rc)
-	# end if
-# end on_disconnect
+		stateTopic = userdata["out-topic"] + "/state"
+		client.publish(stateTopic, payload="online", qos=1, retain=True)
+		# last will message
+		client.will_set(stateTopic, payload="offline", qos=1, retain=True)
+	# end on_connect
 
 
-def on_message(client, userdata, msg):
-	userdata['logger'].info("Topic: %s - Message: %s", msg.topic, msg.payload.decode())
-# end on_message
+	def on_disconnect(self, client, userdata, rc):
+		msg = "Disconnected with result code: %i"
+		if (rc):
+			userdata['logger'].error(msg, rc)
+		else:
+			userdata['logger'].info(msg, rc)
+		# end if
+	# end on_disconnect
+
+
+	def on_message(self, client, userdata, msg):
+		userdata['logger'].info("Topic: %s - Message: %s", msg.topic, msg.payload.decode())
+	# end on_message
+
+
+	def publishDevices(self, topic, devices):
+		msg = json.dumps(devices)
+		self.publish(topic, payload=msg)
+	# end publishDevices
 
 
 def main():
@@ -125,6 +133,7 @@ def main():
 	mqttTopic = str(options.topic)
 	while (mqttTopic.endswith("/")):
 		mqttTopic = mqttTopic[:-1]
+	# end while
 
 	# add infos to userdata
 	userdata = dict()
@@ -150,15 +159,10 @@ def main():
 	killer = GracefulKiller()
 
 	# add MQTT client
-	client = mqtt.Client()
+	client = saneMQTT()
 	
 	# set user data for callbacks
 	client.user_data_set(userdata)
-
-	# register callbacks
-	client.on_connect = on_connect
-	client.on_disconnect = on_disconnect
-	client.on_message = on_message
 
 	# check username and password
 	if (len(options.username) > 0):
@@ -173,6 +177,14 @@ def main():
 	ver = sane.init()
 	logger.debug("SANE version: %s", ver)
 
+	# devices
+	devices = sane.get_devices()
+	userdata["devices"] = devices
+	logger.debug("scanner: %s", str(devices))
+	if (len(devices) < 1):
+		logger.error("No devices available. Please trigger device search at runtime.")
+	# end if
+
 	# debug output
 	logger.debug("MQTT server: %s" ,options.server)
 	logger.debug("MQTT port: %i", options.port)
@@ -182,6 +194,9 @@ def main():
 	logger.debug("connect to mqtt client")
 	client.connect(options.server, options.port, options.keepalive)
 
+	if (len(devices) > 0):
+		client.publishDevices(userdata["out-topic"] + "/devices", devices)
+
 	# start client loop
 	client.loop_start()
 
@@ -190,8 +205,6 @@ def main():
 		logger.debug("start program loop")
 		
 		while (1):
-			
-
 			time.sleep(0.1)
 		
 			if (killer.kill_now):
