@@ -34,6 +34,11 @@ def on_connect(client, userdata, flags, rc):
 	userdata['logger'].info("Connected with result code: %i", rc)
 
 	client.subscribe(userdata["in-topic"], qos=1)
+
+	stateTopic = userdata["out-topic"] + "/state"
+	client.publish(stateTopic, payload="online", qos=1, retain=True)
+	# last will message
+	client.will_set(stateTopic, payload="offline", qos=1, retain=True)
 # end on_connect
 
 
@@ -124,6 +129,7 @@ def main():
 	# add infos to userdata
 	userdata = dict()
 	userdata["in-topic"] = mqttTopic + "/in"
+	userdata["out-topic"] = mqttTopic
 	
 	# init logging
 	loglevel = int(options.loglevel)
@@ -163,10 +169,14 @@ def main():
 		client.username_pw_set(options.username, options.password)
 	# end if
 
+	# sane init
+	ver = sane.init()
+	logger.debug("SANE version: %s", ver)
+
 	# debug output
-	logger.debug("server: %s" ,options.server)
-	logger.debug("port: %i", options.port)
-	logger.debug("topic: %s", mqttTopic)
+	logger.debug("MQTT server: %s" ,options.server)
+	logger.debug("MQTT port: %i", options.port)
+	logger.debug("MQTT input topic: %s", userdata["in-topic"])
 
 	# connect to mqttclient
 	logger.debug("connect to mqtt client")
@@ -193,6 +203,7 @@ def main():
 	# end try
 	
 	# disconnecting
+	client.publish(userdata["out-topic"] + "/state", payload="offline", qos=1, retain=True)
 	logger.debug("disconnecting from MQTT server")
 	client.loop_stop()
 	client.disconnect()
