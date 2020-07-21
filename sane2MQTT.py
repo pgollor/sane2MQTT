@@ -31,38 +31,55 @@ class GracefulKiller:
 
 
 class saneMQTT(mqtt.Client):
+	logger = None
+	outTopic = ""
+	inTopic = ""
+	stateTopic = ""
+	devices = list()
+
+	def setTopics(self, inT, outT):
+		self.outTopic = str(outT)
+		self.inTopic = str(inT)
+		self.stateTopic = self.outTopic + "/state"
+	# end setTopics
+
+	def setDevices(self, devices):
+		self.devices = devices
+	# end setDevices
 
 	def on_connect(self, client, userdata, flags, rc):
-		userdata['logger'].debug("Connected with result code: %i", rc)
+		self.logger.debug("Connected with result code: %i", rc)
 
-		client.subscribe(userdata["in-topic"], qos=1)
+		self.subscribe(self.inTopic + "/#", qos=1)
+		message_callback_add(self.inTopic + "/set_devices", self.on_setDevices)
+		self.logger.debug("subscribe to: %s", self.inTopic + "/#")
 
-		stateTopic = userdata["out-topic"] + "/state"
-		client.publish(stateTopic, payload="online", qos=1, retain=True)
+		client.publish(self.stateTopic, payload="online", qos=1, retain=True)
 		# last will message
-		client.will_set(stateTopic, payload="offline", qos=1, retain=True)
+		client.will_set(self.stateTopic, payload="offline", qos=1, retain=True)
 	# end on_connect
-
 
 	def on_disconnect(self, client, userdata, rc):
 		msg = "Disconnected with result code: %i"
 		if (rc):
-			userdata['logger'].error(msg, rc)
+			self.logger.error(msg, rc)
 		else:
-			userdata['logger'].debug(msg, rc)
-		# end if
+			self.logger.debug(msg, rc)
 	# end on_disconnect
 
-
 	def on_message(self, client, userdata, msg):
-		userdata['logger'].info("Topic: %s - Message: %s", msg.topic, msg.payload.decode())
+		self.logger.info("Topic: %s - Message: %s", msg.topic, msg.payload.decode())
 	# end on_message
-
 
 	def publishDevices(self, topic, devices):
 		msg = json.dumps(devices)
 		self.publish(topic, payload=msg)
 	# end publishDevices
+
+	def on_setDevice(self, client, userdata, msg):
+		self.logger.debug(msag)
+
+# end class saneMQTT
 
 
 def main():
@@ -137,16 +154,14 @@ def main():
 
 	# add infos to userdata
 	userdata = dict()
-	userdata["in-topic"] = mqttTopic + "/in"
-	userdata["out-topic"] = mqttTopic
+	inTopic = mqttTopic + "/in"
+	outTopic = mqttTopic
 	
 	# init logging
 	loglevel = int(options.loglevel)
 	if (options.verbose):
 		loglevel = logging.DEBUG
-	# end if
 	logger = logging.getLogger("miflora2mqtt")
-	userdata["logger"] = logger
 	logger.setLevel(loglevel)
 	ch = logging.StreamHandler()
 	ch.setLevel(loglevel)
@@ -161,14 +176,14 @@ def main():
 	# add MQTT client
 	client = saneMQTT()
 	
-	# set user data for callbacks
-	client.user_data_set(userdata)
-
+	# set user data
+	client.logger = logger
+	client.setTopics(inTopic, outTopic)
+	
 	# check username and password
 	if (len(options.username) > 0):
 		if (len(options.password) == 0):
 			raise ValueError("please do not use username without password")
-		# end if
 		
 		client.username_pw_set(options.username, options.password)
 	# end if
@@ -179,12 +194,14 @@ def main():
 
 	# scanner devices
 	devices = sane.get_devices()
-	userdata["devices"] = devices
+	client.setDevices(devices)
 	logger.debug("scanner: %s", str(devices))
+	print(len(devices))
 	if (len(devices) < 1):
 		logger.error("No devices available. Please trigger device search at runtime.")
 	else:
-		logger.info("scanner: %s %s", devices[0][1], devices[0][2])
+		for i in range(len(devices)):
+			logger.info("scanner %i: %s %s", i, devices[0][1], devices[0][2])
 	# end if
 
 	# mqtt parameters
@@ -196,14 +213,14 @@ def main():
 	logger.debug("MQTT server: %s", mqttServer)
 	logger.debug("MQTT port: %i", mqttPort)
 	logger.debug("MQTT keepalive: %i", mqttKeepalive)
-	logger.info("MQTT input topic: %s", userdata["in-topic"])
+	logger.info("MQTT input topic: %s", inTopic)
 
 	# connect to mqttclient
 	logger.debug("connect to mqtt client")
 	client.connect(mqttServer, mqttPort, mqttKeepalive)
 
 	if (len(devices) > 0):
-		client.publishDevices(userdata["out-topic"] + "/devices", devices)
+		client.publishDevices(outTopic + "/devices", devices)
 
 	# start client loop
 	client.loop_start()
@@ -224,7 +241,7 @@ def main():
 	# end try
 	
 	# disconnecting
-	client.publish(userdata["out-topic"] + "/state", payload="offline", qos=1, retain=True)
+	client.publish(client.stateTopic, payload="offline", qos=1, retain=True)
 	logger.debug("disconnecting from MQTT server")
 	client.loop_stop()
 	client.disconnect()
@@ -237,5 +254,3 @@ if __name__ == "__main__":
 		main()
 	except Exception as e:
 		logging.error(str(e))
-	# end try
-# end if
