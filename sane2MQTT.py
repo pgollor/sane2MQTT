@@ -33,7 +33,7 @@ class GracefulKiller:
 class saneMQTT(mqtt.Client):
 
 	def on_connect(self, client, userdata, flags, rc):
-		userdata['logger'].info("Connected with result code: %i", rc)
+		userdata['logger'].debug("Connected with result code: %i", rc)
 
 		client.subscribe(userdata["in-topic"], qos=1)
 
@@ -49,7 +49,7 @@ class saneMQTT(mqtt.Client):
 		if (rc):
 			userdata['logger'].error(msg, rc)
 		else:
-			userdata['logger'].info(msg, rc)
+			userdata['logger'].debug(msg, rc)
 		# end if
 	# end on_disconnect
 
@@ -177,22 +177,30 @@ def main():
 	ver = sane.init()
 	logger.debug("SANE version: %s", ver)
 
-	# devices
+	# scanner devices
 	devices = sane.get_devices()
 	userdata["devices"] = devices
 	logger.debug("scanner: %s", str(devices))
 	if (len(devices) < 1):
 		logger.error("No devices available. Please trigger device search at runtime.")
+	else:
+		logger.info("scanner: %s %s", devices[0][1], devices[0][2])
 	# end if
 
+	# mqtt parameters
+	mqttServer = str(options.server).strip()
+	mqttPort = int(options.port)
+	mqttKeepalive = int(options.keepalive)
+
 	# debug output
-	logger.debug("MQTT server: %s" ,options.server)
-	logger.debug("MQTT port: %i", options.port)
-	logger.debug("MQTT input topic: %s", userdata["in-topic"])
+	logger.debug("MQTT server: %s", mqttServer)
+	logger.debug("MQTT port: %i", mqttPort)
+	logger.debug("MQTT keepalive: %i", mqttKeepalive)
+	logger.info("MQTT input topic: %s", userdata["in-topic"])
 
 	# connect to mqttclient
 	logger.debug("connect to mqtt client")
-	client.connect(options.server, options.port, options.keepalive)
+	client.connect(mqttServer, mqttPort, mqttKeepalive)
 
 	if (len(devices) > 0):
 		client.publishDevices(userdata["out-topic"] + "/devices", devices)
