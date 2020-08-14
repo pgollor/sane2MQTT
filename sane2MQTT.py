@@ -77,7 +77,7 @@ class saneMQTT(mqtt.Client):
 	# end publishDevices
 
 	def on_setDevice(self, client, userdata, msg):
-		self.logger.debug(msag)
+		self.logger.debug(msg)
 
 # end class saneMQTT
 
