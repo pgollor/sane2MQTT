@@ -30,34 +30,36 @@ class GracefulKiller:
 # end class GracefulKiller
 
 
+# class as interface between sane and the mqtt protocol
 class saneMQTT(mqtt.Client):
 	logger = None
 	outTopic = ""
 	inTopic = ""
 	stateTopic = ""
 	devices = list()
+	device = None
 
 	def setTopics(self, inT, outT):
 		self.outTopic = str(outT)
 		self.inTopic = str(inT)
 		self.stateTopic = self.outTopic + "/state"
-	# end setTopics
+
 
 	def setDevices(self, devices):
 		self.devices = devices
-	# end setDevices
+
 
 	def on_connect(self, client, userdata, flags, rc):
 		self.logger.debug("Connected with result code: %i", rc)
 
 		self.subscribe(self.inTopic + "/#", qos=1)
-		message_callback_add(self.inTopic + "/set_devices", self.on_setDevices)
+		self.message_callback_add(self.inTopic + "/set_device", self.on_setDevice)
 		self.logger.debug("subscribe to: %s", self.inTopic + "/#")
 
-		client.publish(self.stateTopic, payload="online", qos=1, retain=True)
+		self.publish(self.stateTopic, payload="online", qos=1, retain=True)
 		# last will message
-		client.will_set(self.stateTopic, payload="offline", qos=1, retain=True)
-	# end on_connect
+		self.will_set(self.stateTopic, payload="offline", qos=1, retain=True)
+
 
 	def on_disconnect(self, client, userdata, rc):
 		msg = "Disconnected with result code: %i"
@@ -65,19 +67,35 @@ class saneMQTT(mqtt.Client):
 			self.logger.error(msg, rc)
 		else:
 			self.logger.debug(msg, rc)
-	# end on_disconnect
+
 
 	def on_message(self, client, userdata, msg):
 		self.logger.info("Topic: %s - Message: %s", msg.topic, msg.payload.decode())
-	# end on_message
+
 
 	def publishDevices(self, topic, devices):
 		msg = json.dumps(devices)
 		self.publish(topic, payload=msg)
-	# end publishDevices
+
 
 	def on_setDevice(self, client, userdata, msg):
-		self.logger.debug(msg)
+		devID = -1
+		
+		try:
+			try:
+				devID = int(msg.payload.decode())
+			except ValueError:
+				raise RuntimeError("Unknown device ID")
+			if (len(self.devices) == 0):
+				raise RuntimeError("No devices available.")
+			if (len(self.devices) < (devID + 1)):
+				raise RuntimeError("Invalid device ID.")
+		except RuntimeError as e:
+			self.logger.error(e.args)
+			return
+		self.device = self.devices[devID]
+
+		self.logger.info("using device: %s", self.device)
 
 # end class saneMQTT
 
@@ -150,7 +168,6 @@ def main():
 	mqttTopic = str(options.topic)
 	while (mqttTopic.endswith("/")):
 		mqttTopic = mqttTopic[:-1]
-	# end while
 
 	# add infos to userdata
 	userdata = dict()
