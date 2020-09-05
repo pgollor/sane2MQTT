@@ -38,6 +38,7 @@ class saneMQTT(mqtt.Client):
 	stateTopic = ""
 	devices = list()
 	device = None
+	options = {'mode': 'Lineart', 'resolution': 300, 'source': 'Automatic Document Feeder'}
 
 	def setTopics(self, inT, outT):
 		self.outTopic = str(outT)
@@ -58,6 +59,8 @@ class saneMQTT(mqtt.Client):
 		# commands
 		self.message_callback_add(self.inTopic + "/set_device", self.on_setDevice)
 		self.message_callback_add(self.inTopic + "/list_devices", self.on_listDevices)
+		self.message_callback_add(self.inTopic + "/scan", self.on_scan)
+		self.message_callback_add(self.inTopic + "/set_option", self.on_setOption)
 
 		self.publish(self.stateTopic, payload="online", qos=1, retain=True)
 		# last will message
@@ -104,14 +107,76 @@ class saneMQTT(mqtt.Client):
 				raise RuntimeError("Invalid device ID.")
 		except RuntimeError as e:
 			self.logger.error(e.args)
+			self.error(e.args)
 			return
-		self.device = self.devices[devID]
-
+		self.device = sane.open(self.devices[devID][0])
 		self.logger.info("using device: %s", self.device)
+
+		# set optinos
+		try:
+			self.device.mode = self.options['mode']
+			self.device.resolution = self.options['resolution']
+			self.device.source = self.options['source']
+		except:
+			self.logger.error('Cannot set device options')
+			self.error('Cannot set device options')
 	
 
 	def on_listDevices(self, client, userdata, msg):
 		self.publishDevices()
+
+
+	def on_scan(self, client, userdata, msg):
+		if (self.device == None):
+			self.error("No scan device selected")
+			return
+
+		filepath = '/tmp/a.png'
+
+		try:
+			self.device.start()
+			im = self.device.snap()
+			im.save(filepath)
+		except Exception as e:
+			self.error(e.args)
+			self.logger.error(e.args)
+			return
+
+		self.publish(self.outTopic + "/scan_ready", payload=filepath)
+		
+
+
+	def on_setOption(self, client, userdata, msg):
+		if (self.device == None):
+			self.error("No scan device selected")
+			return
+
+		options = json.loads(msg.payload.decode())
+		self.logger.debug(options)
+
+		try:
+			if ('mode' in options):
+				self.device.mode = options['mode'].strip
+			if ('resolution' in options):
+				self.device.resolution = int(options['resolution'])
+			if ('source' in options):
+				source = str(options['source']).strip()
+				if (source.lower == "adf"):
+					source = 'Automatic Document Feeder'
+				self.device.source = source
+		except Exception as e:
+			print(e.args)
+			self.logger.error('Cannot set options')
+			self.error('Cannot set options')
+		
+
+	def error(self, message):
+		self.publish(self.outTopic + "/error", payload=str(message))
+
+	
+	def stop(self):
+		if (self.device != None):
+			self.device.close()
 
 # end class saneMQTT
 
@@ -274,6 +339,7 @@ def main():
 	# end try
 	
 	# disconnecting
+	client.stop()
 	client.publish(client.stateTopic, payload="offline", qos=1, retain=True)
 	logger.debug("disconnecting from MQTT server")
 	client.loop_stop()
