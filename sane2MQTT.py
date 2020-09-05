@@ -53,8 +53,11 @@ class saneMQTT(mqtt.Client):
 		self.logger.debug("Connected with result code: %i", rc)
 
 		self.subscribe(self.inTopic + "/#", qos=1)
-		self.message_callback_add(self.inTopic + "/set_device", self.on_setDevice)
 		self.logger.debug("subscribe to: %s", self.inTopic + "/#")
+
+		# commands
+		self.message_callback_add(self.inTopic + "/set_device", self.on_setDevice)
+		self.message_callback_add(self.inTopic + "/list_devices", self.on_listDevices)
 
 		self.publish(self.stateTopic, payload="online", qos=1, retain=True)
 		# last will message
@@ -73,9 +76,18 @@ class saneMQTT(mqtt.Client):
 		self.logger.info("Topic: %s - Message: %s", msg.topic, msg.payload.decode())
 
 
-	def publishDevices(self, topic, devices):
-		msg = json.dumps(devices)
-		self.publish(topic, payload=msg)
+	def publishDevices(self):
+		if (len(self.devices) < 1):
+			return
+
+		msg = json.dumps(self.devices)
+		self.publish(self.outTopic + "/devices", payload=msg)
+
+		for i in range(len(self.devices)):
+			device = self.devices[i]
+			msg = json.dumps({'id': i, "port": device[0], "vendor": device[1], "pid": device[2], "type": device[3]})
+			self.logger.debug(msg)
+			self.publish(self.outTopic + "/device", payload=msg)
 
 
 	def on_setDevice(self, client, userdata, msg):
@@ -96,6 +108,10 @@ class saneMQTT(mqtt.Client):
 		self.device = self.devices[devID]
 
 		self.logger.info("using device: %s", self.device)
+	
+
+	def on_listDevices(self, client, userdata, msg):
+		self.publishDevices()
 
 # end class saneMQTT
 
@@ -237,7 +253,7 @@ def main():
 	client.connect(mqttServer, mqttPort, mqttKeepalive)
 
 	if (len(devices) > 0):
-		client.publishDevices(outTopic + "/devices", devices)
+		client.publishDevices()
 
 	# start client loop
 	client.loop_start()
